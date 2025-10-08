@@ -2,243 +2,426 @@ import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
 
+// MARK: - Data Models
+
+struct AudioFileItem: Identifiable {
+    let id = UUID()
+    let url: URL
+    let fileName: String
+    let channelCount: Int
+    var selectedChannels: Set<Int>
+    
+    init(url: URL, channelCount: Int) {
+        self.url = url
+        self.fileName = url.lastPathComponent
+        self.channelCount = channelCount
+        self.selectedChannels = Set(0..<channelCount)
+    }
+}
+
+// MARK: - Main View
+
 struct ContentView: View {
-    @State private var selectedFiles: [URL] = []
-    @State private var channelToExtract: Int = 2
+    @State private var audioFiles: [AudioFileItem] = []
+    @State private var showingImporter = false
+    @State private var showingExporter = false
     @State private var isProcessing = false
-    @State private var statusMessage = ""
-    @State private var showFilePicker = false
-    @State private var processedCount = 0
+    @State private var errorMessage: String?
+    @State private var showingError = false
+    @State private var successMessage: String?
+    @State private var showingSuccess = false
+    
+    var canExport: Bool {
+        !audioFiles.isEmpty && audioFiles.contains { !$0.selectedChannels.isEmpty }
+    }
     
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Audio Channel Extractor")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-            
-            Text("Extract ONE specific channel from multichannel WAV files")
-                .font(.subheadline)
+            VStack(spacing: 0) {
+                // Header
+                headerView
+                
+                Divider()
+                
+                // File List
+                if audioFiles.isEmpty {
+                    emptyStateView
+                } else {
+                    fileListView
+                }
+                
+                Divider()
+                
+                // Bottom toolbar
+                bottomToolbar
+            }
+            .navigationTitle("Audio Channel Extractor")
+            .fileImporter(
+                isPresented: $showingImporter,
+                allowedContentTypes: [UTType.wav],
+                allowsMultipleSelection: true
+            ) { result in
+                handleFileImport(result: result)
+            }
+            /*
+            .fileExporter(
+                isPresented: $showingExporter,
+                document: nil,
+                contentType: .folder,
+                defaultFilename: "Exported Channels"
+            ) { result in
+                handleExport(result: result)
+            }
+             */
+            .alert("Error", isPresented: $showingError, presenting: errorMessage) { _ in
+                Button("OK") { errorMessage = nil }
+            } message: { message in
+                Text(message)
+            }
+            .alert("Success", isPresented: $showingSuccess, presenting: successMessage) { _ in
+                Button("OK") { successMessage = nil }
+            } message: { message in
+                Text(message)
+            }
+    }
+    
+    // MARK: - View Components
+    
+    private var headerView: some View {
+        HStack {
+            Text("Imported Files: \(audioFiles.count)")
+                .font(.headline)
                 .foregroundColor(.secondary)
             
-            Divider()
+            Spacer()
             
-            // File Selection
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Selected Files:")
-                        .font(.headline)
-                    Spacer()
-                    Button(action: {
-                        showFilePicker = true
-                    }) {
-                        Label("Select Files", systemImage: "folder")
-                    }
-                }
-                
-                if selectedFiles.isEmpty {
-                    Text("No files selected")
-                        .foregroundColor(.secondary)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 5) {
-                            ForEach(selectedFiles, id: \.self) { file in
-                                HStack {
-                                    Image(systemName: "waveform")
-                                        .foregroundColor(.blue)
-                                    Text(file.lastPathComponent)
-                                        .font(.system(.body, design: .monospaced))
-                                    Spacer()
-                                }
-                                .padding(.vertical, 4)
-                            }
+            if !audioFiles.isEmpty {
+                Menu {
+                    ForEach(0..<(audioFiles.map(\.channelCount).max() ?? 0), id: \.self) { channel in
+                        Button("Select Channel \(channel + 1) for All") {
+                            selectChannelForAll(channel: channel)
                         }
-                        .padding()
                     }
-                    .frame(maxHeight: 200)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
-                }
-            }
-            
-            Divider()
-            
-            // Channel Selection
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Select Single Channel to Extract:")
-                    .font(.headline)
-                
-                HStack {
-                    Text("Channel Number:")
-                    Stepper(value: $channelToExtract, in: 1...32) {
-                        Text("\(channelToExtract)")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.blue)
-                            .frame(width: 60)
+                    
+                    Divider()
+                    
+                    Button("Select All Channels for All") {
+                        selectAllChannelsForAll()
                     }
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("• Only channel \(channelToExtract) will be exported as mono")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Divider()
-            
-            // Process Button
-            Button(action: processFiles) {
-                HStack {
-                    if isProcessing {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle())
-                            .scaleEffect(0.8)
+                    
+                    Button("Deselect All Channels for All") {
+                        deselectAllChannelsForAll()
                     }
-                    Text(isProcessing ? "Processing..." : "Extract Channel \(channelToExtract)")
+                } label: {
+                    Label("Batch Select", systemImage: "checklist")
                 }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(selectedFiles.isEmpty || isProcessing ? Color.gray : Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(10)
+                .padding(.trailing, 8)
             }
-            .disabled(selectedFiles.isEmpty || isProcessing)
             
-            // Status
-            if !statusMessage.isEmpty {
-                Text(statusMessage)
-                    .font(.body)
-                    .foregroundColor(statusMessage.contains("Error") ? .red : .green)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
+            Button(action: { showingImporter = true }) {
+                Label("Import Files", systemImage: "folder.badge.plus")
             }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+    }
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "waveform.circle")
+                .font(.system(size: 80))
+                .foregroundColor(.secondary)
+            
+            Text("No Audio Files Imported")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            Text("Click 'Import Files' to select WAV files")
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private var fileListView: some View {
+        ScrollView {
+            LazyVStack(spacing: 16) {
+                ForEach(audioFiles.indices, id: \.self) { index in
+                    AudioFileCard(
+                        file: $audioFiles[index],
+                        onRemove: {
+                            audioFiles.remove(at: index)
+                        }
+                    )
+                }
+            }
+            .padding()
+        }
+    }
+    
+    private var bottomToolbar: some View {
+        HStack {
+            Button(action: { audioFiles.removeAll() }) {
+                Label("Clear All", systemImage: "trash")
+            }
+            .disabled(audioFiles.isEmpty)
             
             Spacer()
+            
+            if isProcessing {
+                ProgressView()
+                    .padding(.trailing, 8)
+                Text("Processing...")
+                    .foregroundColor(.secondary)
+            }
+            
+            Button(action: exportChannels) {
+                Label("Export Selected Channels", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!canExport || isProcessing)
         }
-        .padding(30)
-        .frame(minWidth: 600, minHeight: 500)
-        .fileImporter(
-            isPresented: $showFilePicker,
-            allowedContentTypes: [.wav, .audio],
-            allowsMultipleSelection: true
-        ) { result in
-            handleFileSelection(result: result)
-        }
+        .padding()
     }
     
-    func handleFileSelection(result: Result<[URL], Error>) {
+    // MARK: - File Import Logic
+    
+    private func handleFileImport(result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            selectedFiles = urls
-            statusMessage = "Selected \(urls.count) file(s)"
+            for url in urls {
+                analyzeAudioFile(url: url)
+            }
         case .failure(let error):
-            statusMessage = "Error selecting files: \(error.localizedDescription)"
+            showError("Failed to import files: \(error.localizedDescription)")
         }
     }
     
-    func processFiles() {
-        isProcessing = true
-        processedCount = 0
-        statusMessage = "Processing files..."
+    private func analyzeAudioFile(url: URL) {
+        guard url.startAccessingSecurityScopedResource() else {
+            showError("Cannot access file: \(url.lastPathComponent)")
+            return
+        }
         
-        Task {
-            for fileURL in selectedFiles {
-                do {
-                    // Start accessing security-scoped resource
-                    let accessing = fileURL.startAccessingSecurityScopedResource()
-                    defer {
-                        if accessing {
-                            fileURL.stopAccessingSecurityScopedResource()
-                        }
-                    }
-                    
-                    try await extractChannel(from: fileURL, channel: channelToExtract)
-                    processedCount += 1
-                    
-                    await MainActor.run {
-                        statusMessage = "Processed \(processedCount) of \(selectedFiles.count) files..."
-                    }
-                } catch {
-                    await MainActor.run {
-                        statusMessage = "Error processing \(fileURL.lastPathComponent): \(error.localizedDescription)"
+        defer { url.stopAccessingSecurityScopedResource() }
+        
+        do {
+            let audioFile = try AVAudioFile(forReading: url)
+            let channelCount = Int(audioFile.processingFormat.channelCount)
+            
+            if channelCount == 0 {
+                showError("Invalid audio file: \(url.lastPathComponent) has no channels")
+                return
+            }
+            
+            let fileItem = AudioFileItem(url: url, channelCount: channelCount)
+            audioFiles.append(fileItem)
+            
+        } catch {
+            showError("Cannot read audio file '\(url.lastPathComponent)': \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - Export Logic
+    
+    private func exportChannels() {
+        isProcessing = true
+        
+        // Create temporary directory for export
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        
+        do {
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            
+            var totalExported = 0
+            
+            for file in audioFiles {
+                guard file.url.startAccessingSecurityScopedResource() else {
+                    showError("Cannot access file: \(file.fileName)")
+                    isProcessing = false
+                    return
+                }
+                
+                defer { file.url.stopAccessingSecurityScopedResource() }
+                
+                for channel in file.selectedChannels.sorted() {
+                    do {
+                        try extractChannel(from: file.url, channelIndex: channel, to: tempDir, originalName: file.fileName)
+                        totalExported += 1
+                    } catch {
+                        showError("Failed to extract channel \(channel + 1) from '\(file.fileName)': \(error.localizedDescription)")
+                        isProcessing = false
+                        return
                     }
                 }
             }
             
-            await MainActor.run {
-                isProcessing = false
-                statusMessage = "✅ Successfully extracted channel \(channelToExtract) from \(processedCount) file(s)! Saved to Downloads folder."
-            }
+            isProcessing = false
+            
+            // Show success and save location picker
+            saveExportedFiles(from: tempDir, count: totalExported)
+            
+        } catch {
+            showError("Failed to create export directory: \(error.localizedDescription)")
+            isProcessing = false
         }
     }
     
-    func extractChannel(from inputURL: URL, channel: Int) async throws {
-        let audioFile = try AVAudioFile(forReading: inputURL)
+    private func extractChannel(from sourceURL: URL, channelIndex: Int, to directory: URL, originalName: String) throws {
+        let audioFile = try AVAudioFile(forReading: sourceURL)
         let format = audioFile.processingFormat
         
-        guard channel <= Int(format.channelCount) else {
-            throw NSError(domain: "AudioExtractor", code: 1,
-                         userInfo: [NSLocalizedDescriptionKey: "Channel \(channel) does not exist in file (has \(format.channelCount) channels)"])
+        // Create mono format
+        guard let monoFormat = AVAudioFormat(
+            commonFormat: format.commonFormat,
+            sampleRate: format.sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw NSError(domain: "AudioExtractor", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot create mono format"])
         }
         
-        // Create output format (mono)
-        let outputFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                        sampleRate: format.sampleRate,
-                                        channels: 1,
-                                        interleaved: false)!
-        
-        // Create output file URL
-        let fileName = inputURL.deletingPathExtension().lastPathComponent
-        let outputFileName = "\(fileName)_channel\(channel).wav"
-        let outputURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(outputFileName)
-        
-        // Remove existing file if present
-        try? FileManager.default.removeItem(at: outputURL)
+        // Generate output filename
+        let baseName = (originalName as NSString).deletingPathExtension
+        let outputName = "\(baseName)_channel_\(channelIndex + 1).wav"
+        let outputURL = directory.appendingPathComponent(outputName)
         
         // Create output file
-        let outputFile = try AVAudioFile(forWriting: outputURL,
-                                         settings: outputFormat.settings,
-                                         commonFormat: .pcmFormatFloat32,
-                                         interleaved: false)
+        let outputFile = try AVAudioFile(forWriting: outputURL, settings: monoFormat.settings)
         
         // Process audio in chunks
         let bufferSize: AVAudioFrameCount = 4096
-        let readBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: bufferSize)!
-        let writeBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: bufferSize)!
+        guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: bufferSize),
+              let outputBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: bufferSize) else {
+            throw NSError(domain: "AudioExtractor", code: 2, userInfo: [NSLocalizedDescriptionKey: "Cannot create buffers"])
+        }
         
         audioFile.framePosition = 0
         
         while audioFile.framePosition < audioFile.length {
             let framesToRead = min(bufferSize, AVAudioFrameCount(audioFile.length - audioFile.framePosition))
-            readBuffer.frameLength = framesToRead
             
-            try audioFile.read(into: readBuffer)
+            try audioFile.read(into: inputBuffer, frameCount: framesToRead)
             
-            // Extract the specified channel (0-indexed)
-            if let inputChannelData = readBuffer.floatChannelData,
-               let outputChannelData = writeBuffer.floatChannelData {
-                let channelIndex = channel - 1 // Convert to 0-indexed
-                let frameLength = Int(readBuffer.frameLength)
+            // Copy selected channel to output
+            if let inputChannelData = inputBuffer.floatChannelData,
+               let outputChannelData = outputBuffer.floatChannelData {
                 
-                // Copy data from specified channel to mono output
-                memcpy(outputChannelData[0],
-                       inputChannelData[channelIndex],
-                       frameLength * MemoryLayout<Float>.size)
+                let channelData = inputChannelData[channelIndex]
+                let outputData = outputChannelData[0]
                 
-                writeBuffer.frameLength = readBuffer.frameLength
-                try outputFile.write(from: writeBuffer)
+                memcpy(outputData, channelData, Int(framesToRead) * MemoryLayout<Float>.size)
+                outputBuffer.frameLength = framesToRead
+                
+                try outputFile.write(from: outputBuffer)
             }
         }
     }
+    
+    private func saveExportedFiles(from tempDir: URL, count: Int) {
+        // For simplicity, we'll show a success message with the temp directory
+        // In a full implementation, you'd use a directory picker
+        let message = """
+        Successfully exported \(count) channel file(s).
+        
+        Files are saved in: \(tempDir.path)
+        
+        Please copy them to your desired location.
+        """
+        
+        successMessage = message
+        showingSuccess = true
+    }
+    
+    // MARK: - Batch Selection Methods
+    
+    private func selectChannelForAll(channel: Int) {
+        for index in audioFiles.indices {
+            if channel < audioFiles[index].channelCount {
+                audioFiles[index].selectedChannels.insert(channel)
+            }
+        }
+    }
+    
+    private func selectAllChannelsForAll() {
+        for index in audioFiles.indices {
+            audioFiles[index].selectedChannels = Set(0..<audioFiles[index].channelCount)
+        }
+    }
+    
+    private func deselectAllChannelsForAll() {
+        for index in audioFiles.indices {
+            audioFiles[index].selectedChannels.removeAll()
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func showError(_ message: String) {
+        errorMessage = message
+        showingError = true
+    }
 }
+
+// MARK: - Audio File Card View
+
+struct AudioFileCard: View {
+    @Binding var file: AudioFileItem
+    let onRemove: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "waveform")
+                    .foregroundColor(.blue)
+                    .font(.title2)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(file.fileName)
+                        .font(.headline)
+                    
+                    Text("\(file.channelCount) channels • \(file.selectedChannels.count) selected")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            Divider()
+            
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 8) {
+                ForEach(0..<file.channelCount, id: \.self) { channel in
+                    HStack {
+                        Toggle(isOn: Binding(
+                            get: { file.selectedChannels.contains(channel) },
+                            set: { isSelected in
+                                if isSelected {
+                                    file.selectedChannels.insert(channel)
+                                } else {
+                                    file.selectedChannels.remove(channel)
+                                }
+                            }
+                        )) {
+                            Text("Channel \(channel + 1)")
+                                .font(.subheadline)
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color.secondary)
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - App Entry Point
 
 @main
 struct AudioChannelExtractorApp: App {
@@ -249,9 +432,3 @@ struct AudioChannelExtractorApp: App {
     }
 }
 
-// Extension to support WAV files
-extension UTType {
-    static var wav: UTType {
-        UTType(filenameExtension: "wav")!
-    }
-}
