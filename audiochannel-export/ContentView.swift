@@ -62,16 +62,6 @@ struct ContentView: View {
             ) { result in
                 handleFileImport(result: result)
             }
-            /*
-            .fileExporter(
-                isPresented: $showingExporter,
-                document: nil,
-                contentType: .folder,
-                defaultFilename: "Exported Channels"
-            ) { result in
-                handleExport(result: result)
-            }
-             */
             .alert("Error", isPresented: $showingError, presenting: errorMessage) { _ in
                 Button("OK") { errorMessage = nil }
             } message: { message in
