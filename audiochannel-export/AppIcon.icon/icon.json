@@ -1,0 +1,87 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.94109,0.94109,0.94109,1.00000",
+      "display-p3:0.84404,0.84404,0.84404,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "blend-mode" : "normal",
+          "fill" : {
+            "solid" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
+          },
+          "image-name" : "NormalAudio.svg",
+          "name" : "NormalAudio",
+          "position" : {
+            "scale" : 0.9,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "solid" : "display-p3:0.52023,0.68236,0.83459,1.00000"
+          },
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "NormalTrack.svg",
+          "name" : "NormalTrack",
+          "position" : {
+            "scale" : 0.9,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "solid" : "display-p3:1.00000,0.80793,0.32889,1.00000"
+          },
+          "image-name" : "HighlightedAudio.svg",
+          "name" : "HighlightedAudio",
+          "position" : {
+            "scale" : 0.9,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "solid" : "extended-srgb:1.00000,0.55294,0.15686,1.00000"
+          },
+          "image-name" : "HighlightedTrack.svg",
+          "name" : "HighlightedTrack",
+          "position" : {
+            "scale" : 0.9,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
