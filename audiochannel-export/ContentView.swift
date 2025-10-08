@@ -19,6 +19,34 @@ struct AudioFileItem: Identifiable {
     }
 }
 
+// MARK: - FolderDocument for exporting multiple files as a folder
+
+struct FolderDocument: FileDocument {
+    static var readableContentTypes: [UTType] = [.folder]
+    
+    /// Mapping of filename -> data
+    var items: [String: Data] = [:]
+    
+    init(items: [String: Data] = [:]) {
+        self.items = items
+    }
+    
+    init(configuration: ReadConfiguration) throws {
+        // Reading back in not supported in this sample
+        self.items = [:]
+    }
+    
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        var children: [String: FileWrapper] = [:]
+        for (name, data) in items {
+            let child = FileWrapper(regularFileWithContents: data)
+            child.preferredFilename = name
+            children[name] = child
+        }
+        return FileWrapper(directoryWithFileWrappers: children)
+    }
+}
+
 // MARK: - Main View
 
 struct ContentView: View {
@@ -30,6 +58,10 @@ struct ContentView: View {
     @State private var showingError = false
     @State private var successMessage: String?
     @State private var showingSuccess = false
+    
+    // Export state
+    @State private var exportDocument: FolderDocument = FolderDocument()
+    @State private var exportDefaultName: String = "Extracted_Channels"
     
     var canExport: Bool {
         !audioFiles.isEmpty && audioFiles.contains { !$0.selectedChannels.isEmpty }
@@ -61,6 +93,20 @@ struct ContentView: View {
                 allowsMultipleSelection: true
             ) { result in
                 handleFileImport(result: result)
+            }
+            .fileExporter(
+                isPresented: $showingExporter,
+                document: exportDocument,
+                contentType: .folder,
+                defaultFilename: exportDefaultName
+            ) { result in
+                switch result {
+                case .success(let url):
+                    successMessage = "Exported to: \(url.path)"
+                    showingSuccess = true
+                case .failure(let error):
+                    showError("Export failed: \(error.localizedDescription)")
+                }
             }
             .alert("Error", isPresented: $showingError, presenting: errorMessage) { _ in
                 Button("OK") { errorMessage = nil }
@@ -246,7 +292,7 @@ struct ContentView: View {
             
             isProcessing = false
             
-            // Show success and save location picker
+            // Show exporter and let user pick destination
             saveExportedFiles(from: tempDir, count: totalExported)
             
         } catch {
@@ -307,18 +353,33 @@ struct ContentView: View {
     }
     
     private func saveExportedFiles(from tempDir: URL, count: Int) {
-        // For simplicity, we'll show a success message with the temp directory
-        // In a full implementation, you'd use a directory picker
-        let message = """
-        Successfully exported \(count) channel file(s).
-        
-        Files are saved in: \(tempDir.path)
-        
-        Please copy them to your desired location.
-        """
-        
-        successMessage = message
-        showingSuccess = true
+        do {
+            let fileURLs = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension.lowercased() == "wav" }
+            
+            if fileURLs.isEmpty {
+                showError("No files found to export.")
+                return
+            }
+            
+            var items: [String: Data] = [:]
+            for url in fileURLs {
+                let data = try Data(contentsOf: url)
+                items[url.lastPathComponent] = data
+            }
+            
+            exportDocument = FolderDocument(items: items)
+            
+            // Suggested default name
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd_HHmmss"
+            exportDefaultName = "Extracted_Channels_\(formatter.string(from: Date()))"
+            
+            showingExporter = true
+            
+        } catch {
+            showError("Failed preparing files for export: \(error.localizedDescription)")
+        }
     }
     
     // MARK: - Batch Selection Methods
